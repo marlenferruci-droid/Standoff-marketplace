@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Standoff Market</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        body { background-color: #1b1b1b; color: white; font-family: 'Exo 2', sans-serif; }
+        .rarity-arcane { border-bottom: 3px solid #ff0000; background: linear-gradient(180deg, #2b2b2b 0%, #3a1a1a 100%); }
+        .rarity-legendary { border-bottom: 3px solid #e91e63; background: linear-gradient(180deg, #2b2b2b 0%, #3a1a2a 100%); }
+        .rarity-epic { border-bottom: 3px solid #9c27b0; }
+        .rarity-common { border-bottom: 3px solid #b0c3d9; }
+        .skin-card { transition: transform 0.2s; }
+        .skin-card:active { transform: scale(0.95); }
+        /* Спиннер загрузки */
+        .loader { border: 4px solid #333; border-top: 4px solid #eab308; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 20px auto; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body class="p-4">
+
+    <div class="flex justify-between items-center mb-6">
+        <h1 class="text-2xl font-bold tracking-widest text-yellow-500">MARKET <span class="text-white">v2</span></h1>
+        <div class="bg-gray-800 px-3 py-1 rounded-lg text-sm text-green-400 font-mono">
+            Balance: <span id="balance">...</span> ₽
+        </div>
+    </div>
+
+    <!-- Фильтры -->
+    <div class="flex gap-2 overflow-x-auto pb-4 no-scrollbar">
+        <button onclick="loadSkins()" class="bg-yellow-500 text-black px-4 py-2 rounded-lg font-bold text-sm">Обновить</button>
+        <button class="bg-gray-800 px-4 py-2 rounded-lg text-sm">Ножи</button>
+        <button class="bg-gray-800 px-4 py-2 rounded-lg text-sm">AWP</button>
+    </div>
+
+    <!-- Сетка товаров -->
+    <div id="loading" class="loader"></div>
+    <div id="skins-grid" class="grid grid-cols-2 gap-4 pb-20 hidden">
+        <!-- Скины добавятся через JS -->
+    </div>
+    
+    <div id="error-msg" class="text-yellow-500 text-center text-sm hidden mt-4"></div>
+
+    <script>
+        const tg = window.Telegram.WebApp;
+        tg.ready();
+        tg.expand();
+        tg.setHeaderColor('#1b1b1b');
+
+        // ==========================================
+        // ⚙️ НАСТРОЙКИ ПОДКЛЮЧЕНИЯ
+        // ==========================================
+        
+        // 1. Вставь сюда ссылку от Ngrok (https://....ngrok-free.app)
+        // Если запускаешь локально без ngrok, оставь http://127.0.0.1:8000 (но в Telegram работать не будет)
+        const API_URL = "https://твоя-ссылка.ngrok-free.app"; 
+
+        // Тестовые данные (Если сервер не отвечает)
+        const DEMO_SKINS = [
+            { id: 1, name: "Demo | Karambit", price: 5000, image_url: "https://files.cults3d.com/uploaders/14660340/illustration-file/a85d3b6f-7023-4560-b8c7-434079815049/Karambit_Gold_render.jpg" },
+            { id: 2, name: "Demo | AWP", price: 2000, image_url: "https://i.pinimg.com/736x/8e/82/33/8e8233f2292f7637840d02dc296339d9.jpg" },
+        ];
+
+        // ==========================================
+        // 🚀 ЛОГИКА
+        // ==========================================
+
+        const grid = document.getElementById('skins-grid');
+        const loader = document.getElementById('loading');
+        const errorDiv = document.getElementById('error-msg');
+        const balanceEl = document.getElementById('balance');
+
+        async function loadSkins() {
+            grid.innerHTML = '';
+            grid.classList.add('hidden');
+            loader.style.display = 'block';
+            errorDiv.classList.add('hidden');
+
+            // Проверка на заглушку: если URL не настроен, сразу грузим демо
+            if (API_URL.includes("твоя-ссылка")) {
+                console.log("API URL не настроен. Загрузка демо-режима.");
+                errorDiv.innerText = "Демо-режим (Бэкенд не подключен)";
+                errorDiv.classList.remove('hidden');
+                renderSkins(DEMO_SKINS);
+                loader.style.display = 'none';
+                grid.classList.remove('hidden');
+                return;
+            }
+
+            try {
+                // 1. Пытаемся получить данные с реального сервера
+                const response = await fetch(`${API_URL}/market/all`);
+                if (!response.ok) throw new Error("Server Error");
+                const skins = await response.json();
+                
+                renderSkins(skins);
+
+            } catch (e) {
+                console.error("Ошибка загрузки:", e);
+                // 2. Если ошибка (сервер выключен), показываем Демо-данные
+                errorDiv.innerText = "Сервер недоступен. Показан Демо-режим.";
+                errorDiv.classList.remove('hidden');
+                renderSkins(DEMO_SKINS);
+            } finally {
+                loader.style.display = 'none';
+                grid.classList.remove('hidden');
+            }
+        }
+
+        async function loadBalance(tgId) {
+            // Пропускаем запрос баланса, если API URL не настроен
+            if (API_URL.includes("твоя-ссылка")) {
+                balanceEl.innerText = "Demo";
+                return;
+            }
+
+            try {
+                const res = await fetch(`${API_URL}/users/${tgId}`);
+                const data = await res.json();
+                balanceEl.innerText = data.balance;
+            } catch (e) {
+                balanceEl.innerText = "---";
+            }
+        }
+
+        function renderSkins(skins) {
+            if (skins.length === 0) {
+                grid.innerHTML = '<div class="col-span-2 text-center text-gray-500">Нет товаров</div>';
+                return;
+            }
+
+            skins.forEach(skin => {
+                // Определяем редкость по цене (условно)
+                let rarity = 'common';
+                if (skin.price > 1000) rarity = 'legendary';
+                if (skin.price > 5000) rarity = 'arcane';
+
+                const card = document.createElement('div');
+                card.className = `skin-card rounded-xl p-3 relative overflow-hidden rarity-${rarity} bg-[#2b2b2b]`;
+                
+                // Используем плейсхолдер, если картинки нет
+                const img = skin.image_url || "https://via.placeholder.com/150?text=No+Image";
+
+                card.innerHTML = `
+                    <div class="h-24 w-full bg-cover bg-center rounded-lg mb-2" style="background-image: url('${img}');"></div>
+                    <div class="text-xs text-gray-400 uppercase font-bold tracking-wider mb-1">${rarity}</div>
+                    <div class="font-bold text-sm mb-1 truncate">${skin.name}</div>
+                    <div class="flex justify-between items-center mt-2">
+                        <span class="text-yellow-400 font-mono text-lg">${skin.price} ₽</span>
+                        <button onclick="buySkin(${skin.id}, '${skin.name}', ${skin.price})" class="bg-white/10 hover:bg-white/20 p-2 rounded-lg transition">
+                            🛒
+                        </button>
+                    </div>
+                `;
+                grid.appendChild(card);
+            });
+        }
+
+        function buySkin(id, name, price) {
+            tg.showPopup({
+                title: 'Покупка',
+                message: `Купить "${name}" за ${price} руб?`,
+                buttons: [
+                    {id: 'buy', type: 'default', text: 'Да, купить'},
+                    {type: 'cancel'}
+                ]
+            }, function(btnId) {
+                if (btnId === 'buy') {
+                    // Отправляем данные боту (он сам свяжется с API)
+                    const data = { action: 'buy', skin_id: id, price: price, name: name };
+                    tg.sendData(JSON.stringify(data));
+                }
+            });
+        }
+
+        // Запускаем при старте
+        loadSkins();
+        
+        // Если есть данные пользователя от Телеграм, пробуем загрузить баланс
+        if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
+             loadBalance(tg.initDataUnsafe.user.id);
+        } else {
+             balanceEl.innerText = "Demo";
+        }
+
+    </script>
+</body>
+</html>
